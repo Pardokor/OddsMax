@@ -742,7 +742,8 @@ async function loadPolymarket() {
   const grid = document.getElementById('polyGrid');
   try {
     // Fetch sports-related markets from Polymarket
-    const res = await fetch('https://gamma-api.polymarket.com/markets?active=true&closed=false&tag_id=6&limit=20&order=volume&ascending=false');
+    const polyUrl = 'https://gamma-api.polymarket.com/markets?active=true&closed=false&tag_id=6&limit=20&order=volume&ascending=false';
+    const res = await fetch('https://corsproxy.io/?' + encodeURIComponent(polyUrl));
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
