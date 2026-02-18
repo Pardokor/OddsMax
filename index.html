@@ -333,6 +333,32 @@
     font-size: 0.72rem;
   }
 
+  .roi-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    border: 1px solid;
+    border-radius: 6px;
+    min-width: 80px;
+    gap: 2px;
+    background: rgba(0,0,0,0.2);
+  }
+  .roi-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+  }
+  .roi-val {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.3rem;
+    letter-spacing: 0.05em;
+    line-height: 1;
+  }
+
   .toggle-btn {
     display: flex;
     align-items: center;
@@ -490,7 +516,7 @@
       <button class="tab" data-sport="soccer_germany_bundesliga">Bundesliga</button>
       <button class="tab" data-sport="soccer_uefa_champs_league">Champions League</button>
     </div>
-    <button class="refresh-btn" id="refreshBtn" onclick="loadOdds()">
+    <button class="refresh-btn" id="refreshBtn" onclick="loadAll()">
       <span class="icon">↻</span>
       <span class="spinner">◌</span>
       Rafraîchir
@@ -850,6 +876,23 @@ function renderMatches(data) {
       if ((odds.away||0) > best.away.val) best.away = {val:odds.away, book:key};
     });
 
+    // ROI / margin calculation using best odds
+    const bestHome = best.home.val || 0;
+    const bestDraw = best.draw.val || 0;
+    const bestAway = best.away.val || 0;
+    let roi = null, margin = null;
+    if (bestHome > 0 && bestAway > 0) {
+      const impliedSum = (1/bestHome) + (bestDraw > 0 ? 1/bestDraw : 0) + (1/bestAway);
+      margin = ((impliedSum - 1) * 100);
+      roi = ((1 / impliedSum) * 100);
+    }
+    const roiColor = roi === null ? 'var(--muted)' : roi >= 100 ? '#c8f135' : roi >= 97 ? '#f1c835' : '#f17070';
+    const roiBadge = roi !== null ? `
+      <div class="roi-badge" style="color:${roiColor};border-color:${roiColor}">
+        <span class="roi-label">Retour</span>
+        <span class="roi-val">${roi.toFixed(2)}%</span>
+      </div>` : '';
+
     const bookKeys = Object.keys(bookOdds);
     const tableRows = bookKeys.map(key => {
       const o = bookOdds[key];
@@ -883,6 +926,7 @@ function renderMatches(data) {
       </div>
 
       <div class="best-odds-row">
+        ${roiBadge}
         <div class="outcome-col">
           <div class="outcome-label">1 — Domicile</div>
           <div class="best-odd">${best.home.val ? best.home.val.toFixed(2) : '—'}</div>
