@@ -249,10 +249,13 @@
   /* Best odds highlight row */
   .best-odds-row {
     padding: 16px 20px;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    display: flex;
+    align-items: center;
     gap: 12px;
     background: var(--surface2);
+  }
+  .best-odds-row .outcome-col {
+    flex: 1;
   }
 
   .outcome-col {
@@ -341,7 +344,8 @@
     padding: 8px 16px;
     border: 1px solid;
     border-radius: 6px;
-    min-width: 80px;
+    min-width: 90px;
+    flex-shrink: 0;
     gap: 2px;
     background: rgba(0,0,0,0.2);
   }
