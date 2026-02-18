@@ -742,43 +742,60 @@ async function loadPolymarket() {
   const grid = document.getElementById('polyGrid');
   try {
     // Fetch sports-related markets from Polymarket
-    const polyUrl = 'https://gamma-api.polymarket.com/markets?active=true&closed=false&tag_id=6&limit=20&order=volume&ascending=false';
+    const polyUrl = 'https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=30&order=volume24hr&ascending=false';
     const res = await fetch('https://corsproxy.io/?' + encodeURIComponent(polyUrl));
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    const markets = Array.isArray(data) ? data : (data.markets || data.data || []);
+    let allMarkets = Array.isArray(data) ? data : (data.markets || data.data || []);
 
+    // Filter sport-related markets
+    const SPORT_KEYWORDS = ['football','soccer','ligue','league','champions','cup','nba','nfl','tennis','ufc','mma','rugby','win','beat','match','game','playoff','final','championship','tournament','world cup','euro','olympic','formula','f1','nhl','mlb'];
+    let markets = allMarkets.filter(m => {
+      const q = (m.question || m.title || '').toLowerCase();
+      return SPORT_KEYWORDS.some(k => q.includes(k));
+    });
+    if (markets.length === 0) markets = allMarkets.slice(0, 20);
     if (!markets.length) throw new Error('Aucun marché trouvé');
 
     document.getElementById('polyCount').textContent = `${markets.length} marchés`;
 
     grid.innerHTML = markets.map((m, idx) => {
-      // Parse outcomes
       let yesPrice = null, noPrice = null;
       try {
-        const outcomes = JSON.parse(m.outcomePrices || m.outcome_prices || '[]');
-        const names = JSON.parse(m.outcomes || '[]');
-        names.forEach((name, i) => {
-          const price = parseFloat(outcomes[i]);
-          if (name.toLowerCase() === 'yes' || name.toLowerCase() === 'oui') yesPrice = price;
-          if (name.toLowerCase() === 'no' || name.toLowerCase() === 'non') noPrice = price;
-        });
-        if (yesPrice === null && outcomes.length >= 2) {
+        let outcomes = m.outcomePrices || m.outcome_prices;
+        let names = m.outcomes;
+        if (typeof outcomes === 'string') outcomes = JSON.parse(outcomes);
+        if (typeof names === 'string') names = JSON.parse(names);
+        if (Array.isArray(names) && Array.isArray(outcomes)) {
+          names.forEach((name, i) => {
+            const price = parseFloat(outcomes[i]);
+            if (!isNaN(price)) {
+              const n = name.toLowerCase();
+              if (n === 'yes' || n === 'oui') yesPrice = price;
+              else if (n === 'no' || n === 'non') noPrice = price;
+            }
+          });
+        }
+        if (yesPrice === null && Array.isArray(outcomes) && outcomes.length >= 2) {
           yesPrice = parseFloat(outcomes[0]);
           noPrice = parseFloat(outcomes[1]);
+        }
+        if (yesPrice === null) {
+          yesPrice = parseFloat(m.lastTradePrice || m.price || 0) || null;
+          if (yesPrice) noPrice = 1 - yesPrice;
         }
       } catch(e) {}
 
       const toOdd = p => p && p > 0 ? (1/p).toFixed(2) : '—';
-      const toProb = p => p ? `${(p*100).toFixed(0)}%` : '—';
-
-      const volume = m.volume ? `Vol. $${parseInt(m.volume).toLocaleString('fr-FR')}` : '';
+      const toProb = p => (p !== null && p !== undefined && !isNaN(p) && p > 0) ? `${(p*100).toFixed(0)}%` : '—';
+      const vol = parseFloat(m.volume || m.volume24hr || 0);
+      const volume = vol > 0 ? `Vol. $${Math.round(vol).toLocaleString('fr-FR')}` : '';
 
       return `
       <div class="poly-card" style="animation-delay:${idx * 0.04}s">
         <div>
-          <div class="poly-title">${m.question || m.title}</div>
+          <div class="poly-title">${m.question || m.title || 'Marché'}</div>
           <div class="poly-subtitle">${volume}</div>
         </div>
         <div>
@@ -793,7 +810,7 @@ async function loadPolymarket() {
     }).join('');
 
   } catch(err) {
-    grid.innerHTML = `<div class="state-empty"><span class="big">!</span>Impossible de charger Polymarket : ${err.message}<br><br><small>L'API Polymarket peut nécessiter un proxy CORS. Voir note ci-dessous.</small></div>`;
+    grid.innerHTML = `<div class="state-empty"><span class="big">!</span>Impossible de charger Polymarket : ${err.message}</div>`;
   }
 }
 
