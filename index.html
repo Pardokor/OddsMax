@@ -545,6 +545,7 @@
     <span class="stat-val" id="statQuota">—</span>
     <span class="stat-label">Requêtes restantes</span>
   </div>
+  <div id="backendBadge" style="display:none;align-items:center;margin-left:auto;font-family:'DM Mono',monospace;font-size:0.72rem;color:#c8f135;background:rgba(200,241,53,0.08);border:1px solid rgba(200,241,53,0.2);border-radius:4px;padding:4px 12px;"></div>
 </div>
 
 <main>
@@ -585,6 +586,9 @@ const BASE_URL = 'https://api.the-odds-api.com/v4';
 
 // Bookmaker name mapping (key → display name)
 const BOOK_NAMES = {
+  winamax: 'Winamax',
+  betclic: 'Betclic',
+  parionssport: 'ParionsSport',
   betclic: 'Betclic',
   winamax: 'Winamax',
   unibet: 'Unibet',
@@ -673,8 +677,39 @@ async function loadAll() {
   hideError();
   polymarketData = {};
 
-  await Promise.all([fetchBookmakers(), fetchPolymarket()]);
+  await Promise.all([fetchBookmakers(), fetchPolymarket(), fetchLocalBackend()]);
   btn.classList.remove('loading');
+}
+
+// Local backend odds (Betclic, Winamax, ParionsSport)
+let localBackendData = {}; // { normKey: {winamax, betclic, parionssport} }
+
+async function fetchLocalBackend() {
+  try {
+    const res = await fetch(`http://localhost:5000/odds/${currentSport}`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return;
+    const data = await res.json();
+
+    localBackendData = {};
+    const bookies = ['winamax', 'betclic', 'parionssport'];
+    bookies.forEach(bk => {
+      (data[bk] || []).forEach(m => {
+        const key = normTeam(m.home) + '|' + normTeam(m.away);
+        if (!localBackendData[key]) localBackendData[key] = {};
+        localBackendData[key][bk] = { home: m.home_odd, draw: m.draw_odd, away: m.away_odd };
+      });
+    });
+
+    // Show backend status badge
+    const total = Object.keys(localBackendData).length;
+    document.getElementById('backendBadge').style.display = total > 0 ? 'flex' : 'none';
+    document.getElementById('backendBadge').textContent = `🟢 Backend actif · ${total} matchs`;
+
+    // Re-render with new data
+    if (window._lastMatchData) renderMatches(window._lastMatchData);
+  } catch(e) {
+    document.getElementById('backendBadge').style.display = 'none';
+  }
 }
 
 async function fetchBookmakers() {
@@ -856,10 +891,22 @@ function renderMatches(data) {
       bookOdds[bk.key] = outcomes;
     });
 
-    // Inject Polymarket odds if we have a match
-    let polyEntry = null;
+    // Inject local backend odds (Betclic, Winamax, ParionsSport)
     const normHome = normTeam(match.home_team);
     const normAway = normTeam(match.away_team);
+    for (const [key, bkData] of Object.entries(localBackendData)) {
+      const [kHome, kAway] = key.split('|');
+      if ((teamsMatch(normHome, kHome) && teamsMatch(normAway, kAway)) ||
+          (teamsMatch(normHome, kAway) && teamsMatch(normAway, kHome))) {
+        Object.entries(bkData).forEach(([bkName, odds]) => {
+          if (odds.home || odds.away) bookOdds[bkName] = odds;
+        });
+        break;
+      }
+    }
+
+    // Inject Polymarket odds if we have a match
+    let polyEntry = null;
     for (const [key, entry] of Object.entries(polymarketData)) {
       const [kHome, kAway] = key.split('|');
       if ((teamsMatch(normHome, kHome) && teamsMatch(normAway, kAway)) ||
