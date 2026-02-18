@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OddsMax — Meilleures cotes du marché</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #1a1a24;
+    --border: #2a2a3a;
+    --accent: #c8f135;
+    --accent2: #35f1c8;
+    --text: #e8e8f0;
+    --muted: #666680;
+    --win1: #c8f135;
+    --winX: #f1c835;
+    --win2: #35c8f1;
+    --danger: #f13535;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Background grid */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(200,241,53,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(200,241,53,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  header {
+    position: relative;
+    z-index: 10;
+    padding: 32px 40px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+
+  .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 2.8rem;
+    letter-spacing: 0.08em;
+    color: var(--text);
+    line-height: 1;
+  }
+  .logo span { color: var(--accent); }
+
+  .tagline {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin-top: 4px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .sport-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .tab {
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .tab:hover { border-color: var(--accent); color: var(--accent); }
+  .tab.active { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+
+  .refresh-btn {
+    padding: 8px 20px;
+    border-radius: 4px;
+    border: 1px solid var(--accent);
+    background: transparent;
+    color: var(--accent);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .refresh-btn:hover { background: var(--accent); color: var(--bg); }
+  .refresh-btn.loading { opacity: 0.5; pointer-events: none; }
+  .refresh-btn .spinner { display: none; }
+  .refresh-btn.loading .spinner { display: inline-block; animation: spin 0.8s linear infinite; }
+  .refresh-btn.loading .icon { display: none; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  main {
+    position: relative;
+    z-index: 1;
+    padding: 32px 40px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .section-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.4rem;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+  }
+
+  .count-badge {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+
+  /* API key notice */
+  .api-notice {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin-bottom: 32px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--muted);
+    line-height: 1.6;
+    display: none;
+  }
+  .api-notice.visible { display: block; }
+  .api-notice strong { color: var(--accent); }
+
+  /* Match cards grid */
+  .matches-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .match-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+    animation: fadeIn 0.4s ease both;
+  }
+  .match-card:hover { border-color: #3a3a50; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .match-header {
+    padding: 16px 20px;
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .match-teams {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .team {
+    font-weight: 500;
+    font-size: 0.95rem;
+  }
+
+  .vs {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  .match-meta {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-align: right;
+  }
+
+  .league-tag {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--accent2);
+    background: rgba(53,241,200,0.08);
+    border: 1px solid rgba(53,241,200,0.2);
+    border-radius: 3px;
+    padding: 2px 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+  }
+
+  /* Best odds highlight row */
+  .best-odds-row {
+    padding: 16px 20px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    background: var(--surface2);
+  }
+
+  .outcome-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .outcome-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+  }
+
+  .best-odd {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 2.2rem;
+    letter-spacing: 0.05em;
+    line-height: 1;
+  }
+  .outcome-col:nth-child(1) .best-odd { color: var(--win1); }
+  .outcome-col:nth-child(2) .best-odd { color: var(--winX); }
+  .outcome-col:nth-child(3) .best-odd { color: var(--win2); }
+
+  .best-book {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  /* Bookmakers detail row */
+  .books-detail {
+    padding: 0 20px;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.3s ease;
+  }
+  .books-detail.open {
+    max-height: 600px;
+    padding: 16px 20px;
+  }
+
+  .books-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+  }
+
+  .books-table th {
+    text-align: left;
+    color: var(--muted);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 0 8px 10px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .books-table th:not(:first-child) { text-align: center; }
+
+  .books-table td {
+    padding: 8px;
+    border-bottom: 1px solid rgba(42,42,58,0.5);
+    color: var(--text);
+  }
+  .books-table td:not(:first-child) { text-align: center; }
+  .books-table tr:last-child td { border-bottom: none; }
+
+  .odd-cell { font-size: 0.85rem; }
+  .odd-cell.is-best { color: var(--accent); font-weight: 600; }
+
+  .book-name {
+    color: var(--muted);
+    font-size: 0.72rem;
+  }
+
+  .toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 10px;
+    background: transparent;
+    border: none;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: color 0.2s, background 0.2s;
+  }
+  .toggle-btn:hover { color: var(--text); background: var(--surface2); }
+
+  /* Polymarket section */
+  .poly-section {
+    margin-top: 48px;
+  }
+
+  .poly-badge {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: #9e7bff;
+    background: rgba(158,123,255,0.1);
+    border: 1px solid rgba(158,123,255,0.25);
+    border-radius: 3px;
+    padding: 2px 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .poly-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    align-items: center;
+    gap: 16px;
+    animation: fadeIn 0.4s ease both;
+    transition: border-color 0.2s;
+  }
+  .poly-card:hover { border-color: rgba(158,123,255,0.3); }
+
+  .poly-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+
+  .poly-subtitle {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--muted);
+  }
+
+  .poly-odd {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.8rem;
+    text-align: center;
+    line-height: 1;
+  }
+  .poly-odd.yes { color: var(--win1); }
+  .poly-odd.no { color: var(--danger); }
+
+  .poly-odd-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 2px;
+  }
+
+  /* States */
+  .state-empty {
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.85rem;
+  }
+  .state-empty .big { font-family: 'Bebas Neue', sans-serif; font-size: 3rem; display: block; color: var(--surface2); margin-bottom: 12px; }
+
+  .error-bar {
+    background: rgba(241,53,53,0.1);
+    border: 1px solid rgba(241,53,53,0.3);
+    border-radius: 6px;
+    padding: 12px 16px;
+    color: #f17070;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    margin-bottom: 20px;
+    display: none;
+  }
+  .error-bar.visible { display: block; }
+
+  /* Stats bar */
+  .stats-bar {
+    display: flex;
+    gap: 24px;
+    padding: 16px 40px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-wrap: wrap;
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stat-val {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.4rem;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .stat-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  @media (max-width: 700px) {
+    header { padding: 20px; }
+    main { padding: 20px; }
+    .match-header { grid-template-columns: 1fr; }
+    .poly-card { grid-template-columns: 1fr 1fr; }
+    .stats-bar { padding: 12px 20px; gap: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">Odds<span>Max</span></div>
+    <div class="tagline">Meilleures cotes · Tous bookmakers</div>
+  </div>
+  <div class="header-right">
+    <div class="sport-tabs" id="sportTabs">
+      <button class="tab active" data-sport="soccer_france_ligue_one">Ligue 1</button>
+      <button class="tab" data-sport="soccer_epl">Premier League</button>
+      <button class="tab" data-sport="soccer_spain_la_liga">La Liga</button>
+      <button class="tab" data-sport="soccer_italy_serie_a">Serie A</button>
+      <button class="tab" data-sport="soccer_germany_bundesliga">Bundesliga</button>
+      <button class="tab" data-sport="soccer_uefa_champs_league">Champions League</button>
+    </div>
+    <button class="refresh-btn" id="refreshBtn" onclick="loadOdds()">
+      <span class="icon">↻</span>
+      <span class="spinner">◌</span>
+      Rafraîchir
+    </button>
+  </div>
+</header>
+
+<div class="stats-bar" id="statsBar">
+  <div class="stat">
+    <span class="stat-val" id="statMatches">—</span>
+    <span class="stat-label">Matchs</span>
+  </div>
+  <div class="stat">
+    <span class="stat-val" id="statBooks">—</span>
+    <span class="stat-label">Bookmakers</span>
+  </div>
+  <div class="stat">
+    <span class="stat-val" id="statLastUpdate">—</span>
+    <span class="stat-label">Mise à jour</span>
+  </div>
+  <div class="stat">
+    <span class="stat-val" id="statQuota">—</span>
+    <span class="stat-label">Requêtes restantes</span>
+  </div>
+</div>
+
+<main>
+  <div class="error-bar" id="errorBar"></div>
+
+  <!-- Bookmakers section -->
+  <div class="section-header">
+    <div class="section-title">Bookmakers</div>
+    <div class="count-badge" id="matchCount">0 matchs</div>
+  </div>
+
+  <div class="matches-grid" id="matchesGrid">
+    <div class="state-empty">
+      <span class="big">ODDSMAX</span>
+      Clique sur Rafraîchir pour charger les cotes
+    </div>
+  </div>
+
+  <!-- Polymarket section -->
+  <div class="poly-section">
+    <div class="section-header">
+      <div class="section-title">Polymarket</div>
+      <div class="poly-badge">Marchés prédictifs</div>
+      <div class="count-badge" id="polyCount">0 marchés</div>
+    </div>
+    <div class="matches-grid" id="polyGrid">
+      <div class="state-empty">
+        <span class="big">POLY</span>
+        Chargement des marchés Polymarket...
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const API_KEY = 'b6e969d7c1e1593bc1a011708f36e9c2';
+const BASE_URL = 'https://api.the-odds-api.com/v4';
+
+// Bookmaker name mapping (key → display name)
+const BOOK_NAMES = {
+  betclic: 'Betclic',
+  winamax: 'Winamax',
+  unibet: 'Unibet',
+  unibet_fr: 'Unibet FR',
+  betway: 'Betway',
+  bwin: 'Bwin',
+  pmu: 'PMU',
+  parionssport: 'ParionsSport',
+  zebet: 'ZEbet',
+  betfair: 'Betfair',
+  bet365: 'Bet365',
+  williamhill: 'William Hill',
+  pinnacle: 'Pinnacle',
+  draftkings: 'DraftKings',
+  fanduel: 'FanDuel',
+  bovada: 'Bovada',
+};
+
+function bookName(key) {
+  return BOOK_NAMES[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+let currentSport = 'soccer_france_ligue_one';
+
+// Tab switching
+document.getElementById('sportTabs').addEventListener('click', e => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  currentSport = tab.dataset.sport;
+  loadOdds();
+});
+
+async function loadOdds() {
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('loading');
+  hideError();
+
+  try {
+    const url = `${BASE_URL}/sports/${currentSport}/odds/?apiKey=${API_KEY}&regions=eu&markets=h2h&oddsFormat=decimal&bookmakers=betclic,winamax,unibet_fr,betway,bwin,zebet,parionssport,pmu,bet365,williamhill,pinnacle`;
+
+    const res = await fetch(url);
+
+    // Read quota headers
+    const quota = res.headers.get('x-requests-remaining');
+    const used = res.headers.get('x-requests-used');
+    if (quota) document.getElementById('statQuota').textContent = quota;
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Erreur HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    renderMatches(data);
+
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    btn.classList.remove('loading');
+  }
+}
+
+function renderMatches(data) {
+  const grid = document.getElementById('matchesGrid');
+
+  if (!data || data.length === 0) {
+    grid.innerHTML = `<div class="state-empty"><span class="big">0</span>Aucun match disponible pour ce championnat actuellement.</div>`;
+    document.getElementById('matchCount').textContent = '0 matchs';
+    document.getElementById('statMatches').textContent = '0';
+    return;
+  }
+
+  // Collect all bookmakers
+  const allBooks = new Set();
+  data.forEach(m => m.bookmakers?.forEach(b => allBooks.add(b.key)));
+
+  document.getElementById('statMatches').textContent = data.length;
+  document.getElementById('statBooks').textContent = allBooks.size;
+  document.getElementById('statLastUpdate').textContent = new Date().toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'});
+  document.getElementById('matchCount').textContent = `${data.length} matchs`;
+
+  grid.innerHTML = data.map((match, idx) => {
+    const date = new Date(match.commence_time);
+    const dateStr = date.toLocaleDateString('fr-FR', {day: '2-digit', month: '2-digit'}) + ' ' + date.toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'});
+
+    // Gather odds per bookmaker
+    const bookOdds = {}; // { bookKey: {home, draw, away} }
+    match.bookmakers?.forEach(bk => {
+      const h2h = bk.markets?.find(m => m.key === 'h2h');
+      if (!h2h) return;
+      const outcomes = {};
+      h2h.outcomes.forEach(o => {
+        if (o.name === match.home_team) outcomes.home = o.price;
+        else if (o.name === match.away_team) outcomes.away = o.price;
+        else outcomes.draw = o.price;
+      });
+      bookOdds[bk.key] = outcomes;
+    });
+
+    // Find best odds
+    const best = {home: {val: 0, book: ''}, draw: {val: 0, book: ''}, away: {val: 0, book: ''}};
+    Object.entries(bookOdds).forEach(([key, odds]) => {
+      if (odds.home > best.home.val) best.home = {val: odds.home, book: key};
+      if (odds.draw > best.draw.val) best.draw = {val: odds.draw, book: key};
+      if (odds.away > best.away.val) best.away = {val: odds.away, book: key};
+    });
+
+    // Build detail table
+    const bookKeys = Object.keys(bookOdds);
+    const tableRows = bookKeys.map(key => {
+      const o = bookOdds[key];
+      return `<tr>
+        <td class="book-name">${bookName(key)}</td>
+        <td class="odd-cell ${key === best.home.book ? 'is-best' : ''}">${o.home?.toFixed(2) || '—'}</td>
+        <td class="odd-cell ${key === best.draw.book ? 'is-best' : ''}">${o.draw?.toFixed(2) || '—'}</td>
+        <td class="odd-cell ${key === best.away.book ? 'is-best' : ''}">${o.away?.toFixed(2) || '—'}</td>
+      </tr>`;
+    }).join('');
+
+    const animDelay = idx * 0.05;
+
+    return `
+    <div class="match-card" style="animation-delay:${animDelay}s">
+      <div class="match-header">
+        <div class="match-teams">
+          <span class="team">${match.home_team}</span>
+          <span class="vs">vs</span>
+          <span class="team">${match.away_team}</span>
+        </div>
+        <span class="league-tag">${match.sport_title || ''}</span>
+        <div class="match-meta">${dateStr}</div>
+      </div>
+
+      <div class="best-odds-row">
+        <div class="outcome-col">
+          <div class="outcome-label">1 — Domicile</div>
+          <div class="best-odd">${best.home.val ? best.home.val.toFixed(2) : '—'}</div>
+          <div class="best-book">${best.home.book ? bookName(best.home.book) : ''}</div>
+        </div>
+        <div class="outcome-col">
+          <div class="outcome-label">X — Nul</div>
+          <div class="best-odd">${best.draw.val ? best.draw.val.toFixed(2) : '—'}</div>
+          <div class="best-book">${best.draw.book ? bookName(best.draw.book) : ''}</div>
+        </div>
+        <div class="outcome-col">
+          <div class="outcome-label">2 — Extérieur</div>
+          <div class="best-odd">${best.away.val ? best.away.val.toFixed(2) : '—'}</div>
+          <div class="best-book">${best.away.book ? bookName(best.away.book) : ''}</div>
+        </div>
+      </div>
+
+      ${bookKeys.length > 0 ? `
+      <div class="books-detail" id="detail-${idx}">
+        <table class="books-table">
+          <thead>
+            <tr>
+              <th>Bookmaker</th>
+              <th>1</th>
+              <th>X</th>
+              <th>2</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+      <button class="toggle-btn" onclick="toggleDetail('${idx}', this)">
+        ▾ Voir tous les bookmakers (${bookKeys.length})
+      </button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function toggleDetail(idx, btn) {
+  const el = document.getElementById(`detail-${idx}`);
+  el.classList.toggle('open');
+  btn.textContent = el.classList.contains('open')
+    ? '▴ Masquer les bookmakers'
+    : `▾ Voir tous les bookmakers`;
+}
+
+// --- POLYMARKET ---
+async function loadPolymarket() {
+  const grid = document.getElementById('polyGrid');
+  try {
+    // Fetch sports-related markets from Polymarket
+    const res = await fetch('https://gamma-api.polymarket.com/markets?active=true&closed=false&tag_id=6&limit=20&order=volume&ascending=false');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const markets = Array.isArray(data) ? data : (data.markets || data.data || []);
+
+    if (!markets.length) throw new Error('Aucun marché trouvé');
+
+    document.getElementById('polyCount').textContent = `${markets.length} marchés`;
+
+    grid.innerHTML = markets.map((m, idx) => {
+      // Parse outcomes
+      let yesPrice = null, noPrice = null;
+      try {
+        const outcomes = JSON.parse(m.outcomePrices || m.outcome_prices || '[]');
+        const names = JSON.parse(m.outcomes || '[]');
+        names.forEach((name, i) => {
+          const price = parseFloat(outcomes[i]);
+          if (name.toLowerCase() === 'yes' || name.toLowerCase() === 'oui') yesPrice = price;
+          if (name.toLowerCase() === 'no' || name.toLowerCase() === 'non') noPrice = price;
+        });
+        if (yesPrice === null && outcomes.length >= 2) {
+          yesPrice = parseFloat(outcomes[0]);
+          noPrice = parseFloat(outcomes[1]);
+        }
+      } catch(e) {}
+
+      const toOdd = p => p && p > 0 ? (1/p).toFixed(2) : '—';
+      const toProb = p => p ? `${(p*100).toFixed(0)}%` : '—';
+
+      const volume = m.volume ? `Vol. $${parseInt(m.volume).toLocaleString('fr-FR')}` : '';
+
+      return `
+      <div class="poly-card" style="animation-delay:${idx * 0.04}s">
+        <div>
+          <div class="poly-title">${m.question || m.title}</div>
+          <div class="poly-subtitle">${volume}</div>
+        </div>
+        <div>
+          <div class="poly-odd yes">${toProb(yesPrice)}</div>
+          <div class="poly-odd-label">Oui · ${toOdd(yesPrice)}x</div>
+        </div>
+        <div>
+          <div class="poly-odd no">${toProb(noPrice)}</div>
+          <div class="poly-odd-label">Non · ${toOdd(noPrice)}x</div>
+        </div>
+      </div>`;
+    }).join('');
+
+  } catch(err) {
+    grid.innerHTML = `<div class="state-empty"><span class="big">!</span>Impossible de charger Polymarket : ${err.message}<br><br><small>L'API Polymarket peut nécessiter un proxy CORS. Voir note ci-dessous.</small></div>`;
+  }
+}
+
+function showError(msg) {
+  const bar = document.getElementById('errorBar');
+  bar.textContent = `Erreur : ${msg}`;
+  bar.classList.add('visible');
+}
+
+function hideError() {
+  document.getElementById('errorBar').classList.remove('visible');
+}
+
+// Auto-load on page open
+window.addEventListener('load', () => {
+  loadOdds();
+  loadPolymarket();
+});
+</script>
+
+</body>
+</html>
