@@ -579,6 +579,54 @@ function bookName(key) {
 
 let currentSport = 'soccer_france_ligue_one';
 
+// Global store for polymarket data keyed by normalized team names
+let polymarketData = {}; // { 'team1_team2': { home, draw, away, slug } }
+
+// Normalize team name for matching
+function normTeam(name) {
+  return (name || '').toLowerCase()
+    .replace(/stade brestois 29/i, 'brest')
+    .replace(/olympique de marseille/i, 'marseille')
+    .replace(/paris saint.germain/i, 'psg')
+    .replace(/olympique lyonnais/i, 'lyon')
+    .replace(/as monaco/i, 'monaco')
+    .replace(/ogc nice/i, 'nice')
+    .replace(/rc lens/i, 'lens')
+    .replace(/losc lille/i, 'lille')
+    .replace(/stade rennais/i, 'rennes')
+    .replace(/rc strasbourg/i, 'strasbourg')
+    .replace(/fc nantes/i, 'nantes')
+    .replace(/toulouse fc/i, 'toulouse')
+    .replace(/montpellier/i, 'montpellier')
+    .replace(/le havre/i, 'le havre')
+    .replace(/stade de reims/i, 'reims')
+    .replace(/fc lorient/i, 'lorient')
+    .replace(/angers sco/i, 'angers')
+    .replace(/mans fc/i, 'le mans')
+    .replace(/aj auxerre/i, 'auxerre')
+    .replace(/saint.etienne/i, 'saint-etienne')
+    .replace(/inter milan/i, 'inter')
+    .replace(/ac milan/i, 'milan')
+    .replace(/juventus/i, 'juventus')
+    .replace(/manchester city/i, 'man city')
+    .replace(/manchester united/i, 'man united')
+    .replace(/arsenal/i, 'arsenal')
+    .replace(/chelsea/i, 'chelsea')
+    .replace(/liverpool/i, 'liverpool')
+    .replace(/real madrid/i, 'real madrid')
+    .replace(/atletico/i, 'atletico')
+    .replace(/barcelona/i, 'barcelona')
+    .replace(/fc /g, '')
+    .replace(/\bsc\b/g, '')
+    .replace(/\bfc\b/g, '')
+    .trim();
+}
+
+function teamsMatch(a, b) {
+  const na = normTeam(a), nb = normTeam(b);
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
 // Tab switching
 document.getElementById('sportTabs').addEventListener('click', e => {
   const tab = e.target.closest('.tab');
@@ -586,40 +634,163 @@ document.getElementById('sportTabs').addEventListener('click', e => {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   tab.classList.add('active');
   currentSport = tab.dataset.sport;
-  loadOdds();
+  loadAll();
 });
 
-async function loadOdds() {
+async function loadAll() {
   const btn = document.getElementById('refreshBtn');
   btn.classList.add('loading');
   hideError();
+  polymarketData = {};
 
+  await Promise.all([fetchBookmakers(), fetchPolymarket()]);
+  btn.classList.remove('loading');
+}
+
+async function fetchBookmakers() {
   try {
     const url = `${BASE_URL}/sports/${currentSport}/odds/?apiKey=${API_KEY}&regions=eu&markets=h2h&oddsFormat=decimal&bookmakers=betclic,winamax,unibet_fr,betway,bwin,zebet,parionssport,pmu,bet365,williamhill,pinnacle`;
-
     const res = await fetch(url);
-
-    // Read quota headers
     const quota = res.headers.get('x-requests-remaining');
-    const used = res.headers.get('x-requests-used');
     if (quota) document.getElementById('statQuota').textContent = quota;
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || `Erreur HTTP ${res.status}`);
-    }
-
+    if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.message || `HTTP ${res.status}`); }
     const data = await res.json();
     renderMatches(data);
-
-  } catch (err) {
+  } catch(err) {
     showError(err.message);
-  } finally {
-    btn.classList.remove('loading');
   }
 }
 
+async function fetchPolymarket() {
+  const grid = document.getElementById('polyGrid');
+  try {
+    const LEAGUE_SLUGS = ['ligue-1','premier-league','la-liga','serie-a','bundesliga','champions-league'];
+    const proxyBase = 'https://corsproxy.io/?';
+
+    const results = await Promise.all(LEAGUE_SLUGS.map(async league => {
+      try {
+        const url = `https://gamma-api.polymarket.com/events?active=true&closed=false&tag_slug=${league}&limit=30&order=startDate&ascending=true`;
+        const r = await fetch(proxyBase + encodeURIComponent(url));
+        if (!r.ok) return [];
+        const d = await r.json();
+        return Array.isArray(d) ? d : [];
+      } catch { return []; }
+    }));
+
+    const seen = new Set();
+    const allEvents = results.flat().filter(e => {
+      if (seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    });
+
+    // Parse each event and store in polymarketData
+    allEvents.forEach(event => {
+      const subMarkets = event.markets || [];
+      if (subMarkets.length < 2) return;
+
+      // Extract the 3 outcomes (home/draw/away) from sub-markets
+      // groupItemTitle contains team name or "Draw"
+      const outcomes = subMarkets.map(sm => ({
+        name: (sm.groupItemTitle || sm.question || '').trim(),
+        price: parseFloat(sm.lastTradePrice || sm.price || 0) || 0,
+        slug: event.slug
+      }));
+
+      // Try to identify home/draw/away
+      let home = null, draw = null, away = null;
+      outcomes.forEach(o => {
+        const n = o.name.toLowerCase();
+        if (n.includes('draw') || n.includes('nul')) draw = o;
+        else if (!home) home = o;
+        else if (!away) away = o;
+      });
+
+      if (!home || !away) return;
+
+      // Convert probability to decimal odds
+      const toDecimal = p => p > 0 ? parseFloat((1/p).toFixed(2)) : null;
+
+      const entry = {
+        home: toDecimal(home.price),
+        draw: draw ? toDecimal(draw.price) : null,
+        away: toDecimal(away.price),
+        homeTeam: home.name,
+        awayTeam: away.name,
+        slug: event.slug,
+        title: event.title
+      };
+
+      // Store by both team names for lookup
+      const key = normTeam(home.name) + '|' + normTeam(away.name);
+      polymarketData[key] = entry;
+    });
+
+    document.getElementById('polyCount').textContent = `${Object.keys(polymarketData).length} matchs`;
+    // Re-render matches with poly data injected
+    // (renderMatches reads polymarketData globally)
+    const grid2 = document.getElementById('matchesGrid');
+    if (grid2.querySelector('.match-card')) {
+      // Already rendered, just refresh
+      const lastData = window._lastMatchData;
+      if (lastData) renderMatches(lastData);
+    }
+
+    // Also render the standalone poly section
+    renderPolySection(allEvents);
+
+  } catch(err) {
+    grid.innerHTML = `<div class="state-empty"><span class="big">!</span>Polymarket : ${err.message}</div>`;
+  }
+}
+
+function renderPolySection(allEvents) {
+  const grid = document.getElementById('polyGrid');
+  const FOOTBALL_PATTERNS = [/ligue.?1/i,/premier.?league/i,/la.?liga/i,/serie.?a/i,/bundesliga/i,/champions.?league/i];
+  const football = allEvents.filter(e => {
+    const q = e.title || e.slug || '';
+    return FOOTBALL_PATTERNS.some(p => p.test(q)) || (e.markets||[]).length >= 3;
+  }).slice(0, 30);
+
+  if (!football.length) {
+    grid.innerHTML = `<div class="state-empty"><span class="big">—</span>Aucun match Polymarket trouvé pour ce championnat.</div>`;
+    return;
+  }
+
+  grid.innerHTML = football.map((event, idx) => {
+    const subMarkets = event.markets || [];
+    const vol = parseFloat(event.volume || 0);
+    const volume = vol > 0 ? `Vol. $${Math.round(vol).toLocaleString('fr-FR')}` : '';
+    const startDate = event.startDate ? new Date(event.startDate).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+    const polyLink = `https://polymarket.com/event/${event.slug || ''}`;
+
+    const outcomes = subMarkets.map(sm => ({
+      name: (sm.groupItemTitle || sm.question || '?').trim(),
+      price: parseFloat(sm.lastTradePrice || sm.price || 0) || 0
+    }));
+
+    const toOdd = p => p > 0 ? (1/p).toFixed(2) : '—';
+    const toProb = p => p > 0 ? `${(p*100).toFixed(0)}%` : '—';
+
+    const cols = outcomes.slice(0,3).map(o => `
+      <div>
+        <div class="poly-odd yes" style="font-size:1.4rem">${toProb(o.price)}</div>
+        <div class="poly-odd-label">${o.name}<br><span style="color:var(--accent)">${toOdd(o.price)}x</span></div>
+      </div>`).join('');
+
+    return `
+    <div class="poly-card" style="animation-delay:${idx*0.04}s;cursor:pointer" onclick="window.open('${polyLink}','_blank')">
+      <div>
+        <div class="poly-title">${event.title || 'Match'}</div>
+        <div class="poly-subtitle">${[volume, startDate].filter(Boolean).join(' · ')}</div>
+      </div>
+      ${cols}
+    </div>`;
+  }).join('');
+}
+
 function renderMatches(data) {
+  window._lastMatchData = data;
   const grid = document.getElementById('matchesGrid');
 
   if (!data || data.length === 0) {
@@ -629,21 +800,20 @@ function renderMatches(data) {
     return;
   }
 
-  // Collect all bookmakers
   const allBooks = new Set();
   data.forEach(m => m.bookmakers?.forEach(b => allBooks.add(b.key)));
 
   document.getElementById('statMatches').textContent = data.length;
   document.getElementById('statBooks').textContent = allBooks.size;
-  document.getElementById('statLastUpdate').textContent = new Date().toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'});
+  document.getElementById('statLastUpdate').textContent = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
   document.getElementById('matchCount').textContent = `${data.length} matchs`;
 
   grid.innerHTML = data.map((match, idx) => {
     const date = new Date(match.commence_time);
-    const dateStr = date.toLocaleDateString('fr-FR', {day: '2-digit', month: '2-digit'}) + ' ' + date.toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'});
+    const dateStr = date.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}) + ' ' + date.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
 
-    // Gather odds per bookmaker
-    const bookOdds = {}; // { bookKey: {home, draw, away} }
+    // Bookmaker odds
+    const bookOdds = {};
     match.bookmakers?.forEach(bk => {
       const h2h = bk.markets?.find(m => m.key === 'h2h');
       if (!h2h) return;
@@ -656,20 +826,38 @@ function renderMatches(data) {
       bookOdds[bk.key] = outcomes;
     });
 
-    // Find best odds
-    const best = {home: {val: 0, book: ''}, draw: {val: 0, book: ''}, away: {val: 0, book: ''}};
+    // Inject Polymarket odds if we have a match
+    let polyEntry = null;
+    const normHome = normTeam(match.home_team);
+    const normAway = normTeam(match.away_team);
+    for (const [key, entry] of Object.entries(polymarketData)) {
+      const [kHome, kAway] = key.split('|');
+      if ((teamsMatch(normHome, kHome) && teamsMatch(normAway, kAway)) ||
+          (teamsMatch(normHome, kAway) && teamsMatch(normAway, kHome))) {
+        polyEntry = entry;
+        break;
+      }
+    }
+    if (polyEntry) {
+      bookOdds['polymarket'] = { home: polyEntry.home, draw: polyEntry.draw, away: polyEntry.away };
+    }
+
+    // Best odds
+    const best = {home:{val:0,book:''},draw:{val:0,book:''},away:{val:0,book:''}};
     Object.entries(bookOdds).forEach(([key, odds]) => {
-      if (odds.home > best.home.val) best.home = {val: odds.home, book: key};
-      if (odds.draw > best.draw.val) best.draw = {val: odds.draw, book: key};
-      if (odds.away > best.away.val) best.away = {val: odds.away, book: key};
+      if ((odds.home||0) > best.home.val) best.home = {val:odds.home, book:key};
+      if ((odds.draw||0) > best.draw.val) best.draw = {val:odds.draw, book:key};
+      if ((odds.away||0) > best.away.val) best.away = {val:odds.away, book:key};
     });
 
-    // Build detail table
     const bookKeys = Object.keys(bookOdds);
     const tableRows = bookKeys.map(key => {
       const o = bookOdds[key];
-      return `<tr>
-        <td class="book-name">${bookName(key)}</td>
+      const isPoly = key === 'polymarket';
+      const polyStyle = isPoly ? 'style="color:#9e7bff"' : '';
+      const polyLink = isPoly && polyEntry ? `onclick="window.open('https://polymarket.com/event/${polyEntry.slug}','_blank')" style="cursor:pointer;color:#9e7bff"` : '';
+      return `<tr ${polyLink}>
+        <td class="book-name" ${polyStyle}>${isPoly ? '🟣 Polymarket' : bookName(key)}</td>
         <td class="odd-cell ${key === best.home.book ? 'is-best' : ''}">${o.home?.toFixed(2) || '—'}</td>
         <td class="odd-cell ${key === best.draw.book ? 'is-best' : ''}">${o.draw?.toFixed(2) || '—'}</td>
         <td class="odd-cell ${key === best.away.book ? 'is-best' : ''}">${o.away?.toFixed(2) || '—'}</td>
@@ -677,6 +865,7 @@ function renderMatches(data) {
     }).join('');
 
     const animDelay = idx * 0.05;
+    const hasPoly = !!polyEntry;
 
     return `
     <div class="match-card" style="animation-delay:${animDelay}s">
@@ -686,7 +875,10 @@ function renderMatches(data) {
           <span class="vs">vs</span>
           <span class="team">${match.away_team}</span>
         </div>
-        <span class="league-tag">${match.sport_title || ''}</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          ${hasPoly ? `<span style="font-family:'DM Mono',monospace;font-size:0.65rem;color:#9e7bff;background:rgba(158,123,255,0.1);border:1px solid rgba(158,123,255,0.25);border-radius:3px;padding:2px 8px">🟣 POLY</span>` : ''}
+          <span class="league-tag">${match.sport_title || ''}</span>
+        </div>
         <div class="match-meta">${dateStr}</div>
       </div>
 
@@ -694,36 +886,29 @@ function renderMatches(data) {
         <div class="outcome-col">
           <div class="outcome-label">1 — Domicile</div>
           <div class="best-odd">${best.home.val ? best.home.val.toFixed(2) : '—'}</div>
-          <div class="best-book">${best.home.book ? bookName(best.home.book) : ''}</div>
+          <div class="best-book">${best.home.book === 'polymarket' ? '🟣 Polymarket' : (best.home.book ? bookName(best.home.book) : '')}</div>
         </div>
         <div class="outcome-col">
           <div class="outcome-label">X — Nul</div>
           <div class="best-odd">${best.draw.val ? best.draw.val.toFixed(2) : '—'}</div>
-          <div class="best-book">${best.draw.book ? bookName(best.draw.book) : ''}</div>
+          <div class="best-book">${best.draw.book === 'polymarket' ? '🟣 Polymarket' : (best.draw.book ? bookName(best.draw.book) : '')}</div>
         </div>
         <div class="outcome-col">
           <div class="outcome-label">2 — Extérieur</div>
           <div class="best-odd">${best.away.val ? best.away.val.toFixed(2) : '—'}</div>
-          <div class="best-book">${best.away.book ? bookName(best.away.book) : ''}</div>
+          <div class="best-book">${best.away.book === 'polymarket' ? '🟣 Polymarket' : (best.away.book ? bookName(best.away.book) : '')}</div>
         </div>
       </div>
 
       ${bookKeys.length > 0 ? `
       <div class="books-detail" id="detail-${idx}">
         <table class="books-table">
-          <thead>
-            <tr>
-              <th>Bookmaker</th>
-              <th>1</th>
-              <th>X</th>
-              <th>2</th>
-            </tr>
-          </thead>
+          <thead><tr><th>Bookmaker</th><th>1</th><th>X</th><th>2</th></tr></thead>
           <tbody>${tableRows}</tbody>
         </table>
       </div>
       <button class="toggle-btn" onclick="toggleDetail('${idx}', this)">
-        ▾ Voir tous les bookmakers (${bookKeys.length})
+        ▾ Voir tous les bookmakers (${bookKeys.length}${hasPoly ? ' + Polymarket' : ''})
       </button>` : ''}
     </div>`;
   }).join('');
@@ -732,173 +917,7 @@ function renderMatches(data) {
 function toggleDetail(idx, btn) {
   const el = document.getElementById(`detail-${idx}`);
   el.classList.toggle('open');
-  btn.textContent = el.classList.contains('open')
-    ? '▴ Masquer les bookmakers'
-    : `▾ Voir tous les bookmakers`;
-}
-
-// --- POLYMARKET ---
-async function loadPolymarket() {
-  const grid = document.getElementById('polyGrid');
-  try {
-    // Fetch sports-related markets from Polymarket
-    // Use events endpoint with football tag slugs for best coverage
-    // Fetch events from multiple football leagues in parallel
-    const LEAGUE_SLUGS = [
-      'ligue-1', 'premier-league', 'la-liga', 'serie-a', 'bundesliga', 'champions-league'
-    ];
-
-    const proxyBase = 'https://corsproxy.io/?';
-    const eventPromises = LEAGUE_SLUGS.map(async (league) => {
-      try {
-        const url = `https://gamma-api.polymarket.com/events?active=true&closed=false&tag_slug=${league}&limit=20&order=startDate&ascending=true`;
-        const r = await fetch(proxyBase + encodeURIComponent(url));
-        if (!r.ok) return [];
-        const d = await r.json();
-        return Array.isArray(d) ? d : [];
-      } catch { return []; }
-    });
-
-    // Also fetch a general batch filtered by our known patterns
-    const generalUrl = `https://gamma-api.polymarket.com/events?active=true&closed=false&limit=100&order=startDate&ascending=true`;
-    const generalPromise = fetch(proxyBase + encodeURIComponent(generalUrl))
-      .then(r => r.ok ? r.json() : [])
-      .then(d => Array.isArray(d) ? d : [])
-      .catch(() => []);
-
-    const [generalData, ...leagueData] = await Promise.all([generalPromise, ...eventPromises]);
-
-    // Merge and deduplicate
-    const seen = new Set();
-    let allEvents = [...leagueData.flat(), ...generalData].filter(e => {
-      if (seen.has(e.id)) return false;
-      seen.add(e.id);
-      return true;
-    });
-
-    // Filter football events
-    const FOOTBALL_PATTERNS = [
-      /ligue.?1/i, /premier.?league/i, /la.?liga/i, /serie.?a/i,
-      /bundesliga/i, /champions.?league/i, /ucl/i,
-      /will .+ win on \d{4}-\d{2}-\d{2}/i,
-      /fl1-/i, /epl-/i, /liga-/i, /sra-/i, /bun-/i, /ucl-/i,
-    ];
-
-    let allMarkets = [];
-    allEvents.forEach(event => {
-      const title = event.title || event.question || '';
-      const slug = event.slug || '';
-      const isFootball = FOOTBALL_PATTERNS.some(p => p.test(title) || p.test(slug));
-      if (!isFootball) return;
-
-      // An event contains multiple markets (outcomes)
-      const markets = event.markets || [];
-      if (markets.length > 0) {
-        // Represent the event as a single entry with all markets
-        allMarkets.push({ ...event, _isEvent: true, _markets: markets });
-      }
-    });
-
-    // Deduplicate by event id
-    const seenMarkets = new Set();
-    let markets = allMarkets.filter(m => {
-      const key = m.id || m.slug;
-      if (seenMarkets.has(key)) return false;
-      seenMarkets.add(key);
-      return true;
-    });
-
-    if (!markets.length) {
-      // Fallback: just show top events matching football patterns from general fetch
-      markets = generalData.filter(e => {
-        const q = (e.title || e.question || e.slug || '');
-        return FOOTBALL_PATTERNS.some(p => p.test(q));
-      }).slice(0, 20);
-    }
-    if (!markets.length) throw new Error('Aucun marché trouvé');
-
-    document.getElementById('polyCount').textContent = `${markets.length} marchés`;
-
-    const toOdd = p => p && p > 0 ? (1/p).toFixed(2) : '—';
-    const toProb = p => (p !== null && p !== undefined && !isNaN(p) && p > 0) ? `${(p*100).toFixed(0)}%` : '—';
-
-    const parsePrice = (m) => {
-      // Try outcomePrices on the market itself
-      let outcomes = m.outcomePrices || m.outcome_prices;
-      let names = m.outcomes;
-      try { if (typeof outcomes === 'string') outcomes = JSON.parse(outcomes); } catch(e) {}
-      try { if (typeof names === 'string') names = JSON.parse(names); } catch(e) {}
-
-      let prices = {};
-      if (Array.isArray(names) && Array.isArray(outcomes)) {
-        names.forEach((name, i) => {
-          const p = parseFloat(outcomes[i]);
-          if (!isNaN(p)) prices[name.toLowerCase()] = p;
-        });
-      }
-      // For match markets: outcomes are typically team names
-      // Return all prices keyed by name
-      return { prices, names: Array.isArray(names) ? names : [], outcomes: Array.isArray(outcomes) ? outcomes.map(Number) : [] };
-    };
-
-    grid.innerHTML = markets.map((event, idx) => {
-      const title = event.title || event.question || 'Marché';
-      const vol = parseFloat(event.volume || event.volume24hr || 0);
-      const volume = vol > 0 ? `Vol. $${Math.round(vol).toLocaleString('fr-FR')}` : '';
-      const startDate = event.startDate ? new Date(event.startDate).toLocaleDateString('fr-FR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
-      const polyLink = `https://polymarket.com/event/${event.slug || ''}`;
-
-      // Event has multiple markets (outcomes like home/draw/away or just yes/no)
-      const subMarkets = event._markets || event.markets || [event];
-
-      // Check if it's a match market with 3 outcomes (1X2) or binary
-      let cardContent = '';
-
-      if (subMarkets.length >= 3) {
-        // Match market: show each outcome
-        const outcomes = subMarkets.map(sm => {
-          const p = parseFloat(sm.lastTradePrice || sm.price || sm.outcomePrices?.[0] || 0);
-          return { name: sm.groupItemTitle || sm.question || sm.outcomes?.[0] || '?', price: p };
-        });
-        cardContent = outcomes.map(o => `
-          <div>
-            <div class="poly-odd yes" style="font-size:1.3rem">${toProb(o.price)}</div>
-            <div class="poly-odd-label">${o.name}<br>${toOdd(o.price)}x</div>
-          </div>`).join('');
-      } else if (subMarkets.length === 1 || subMarkets.length === 2) {
-        // Binary yes/no
-        const m = subMarkets[0];
-        const { prices, names, outcomes: outArr } = parsePrice(m);
-        let yesPrice = prices['yes'] || prices['oui'] || outArr[0] || null;
-        let noPrice = prices['no'] || prices['non'] || outArr[1] || null;
-        if (!yesPrice) {
-          yesPrice = parseFloat(m.lastTradePrice || m.price || 0) || null;
-          if (yesPrice) noPrice = 1 - yesPrice;
-        }
-        cardContent = `
-          <div>
-            <div class="poly-odd yes">${toProb(yesPrice)}</div>
-            <div class="poly-odd-label">Oui · ${toOdd(yesPrice)}x</div>
-          </div>
-          <div>
-            <div class="poly-odd no">${toProb(noPrice)}</div>
-            <div class="poly-odd-label">Non · ${toOdd(noPrice)}x</div>
-          </div>`;
-      }
-
-      return `
-      <div class="poly-card" style="animation-delay:${idx * 0.04}s; cursor:pointer" onclick="window.open('${polyLink}','_blank')">
-        <div>
-          <div class="poly-title">${title}</div>
-          <div class="poly-subtitle">${[volume, startDate].filter(Boolean).join(' · ')}</div>
-        </div>
-        ${cardContent}
-      </div>`;
-    }).join('');
-
-  } catch(err) {
-    grid.innerHTML = `<div class="state-empty"><span class="big">!</span>Impossible de charger Polymarket : ${err.message}</div>`;
-  }
+  btn.textContent = el.classList.contains('open') ? '▴ Masquer les bookmakers' : `▾ Voir tous les bookmakers`;
 }
 
 function showError(msg) {
@@ -911,11 +930,7 @@ function hideError() {
   document.getElementById('errorBar').classList.remove('visible');
 }
 
-// Auto-load on page open
-window.addEventListener('load', () => {
-  loadOdds();
-  loadPolymarket();
-});
+window.addEventListener('load', loadAll);
 </script>
 
 </body>
