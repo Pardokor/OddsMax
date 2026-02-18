@@ -749,11 +749,27 @@ async function loadPolymarket() {
 
     let allMarkets = Array.isArray(data) ? data : (data.markets || data.data || []);
 
-    // Filter sport-related markets
-    const SPORT_KEYWORDS = ['football','soccer','ligue','league','champions','cup','nba','nfl','tennis','ufc','mma','rugby','win','beat','match','game','playoff','final','championship','tournament','world cup','euro','olympic','formula','f1','nhl','mlb'];
+    // Filter only football league markets
+    const FOOTBALL_PATTERNS = [
+      /ligue.?(1|one|une)/i,
+      /premier.?league/i,
+      /la.?liga/i,
+      /serie.?a/i,
+      /bundesliga/i,
+      /champions.?league/i,
+      /ucl/i,
+      /ligue 1/i,
+      /win the.*ligue/i,
+      /win the.*premier/i,
+      /win the.*liga/i,
+      /win the.*bundesliga/i,
+      /win the.*serie/i,
+      /win the.*champions/i,
+      /will .* win on 20\d\d-\d\d-\d\d/i,
+    ];
     let markets = allMarkets.filter(m => {
-      const q = (m.question || m.title || '').toLowerCase();
-      return SPORT_KEYWORDS.some(k => q.includes(k));
+      const q = (m.question || m.title || '');
+      return FOOTBALL_PATTERNS.some(p => p.test(q));
     });
     if (markets.length === 0) markets = allMarkets.slice(0, 20);
     if (!markets.length) throw new Error('Aucun marché trouvé');
