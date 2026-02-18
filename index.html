@@ -742,86 +742,157 @@ async function loadPolymarket() {
   const grid = document.getElementById('polyGrid');
   try {
     // Fetch sports-related markets from Polymarket
-    const polyUrl = 'https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=30&order=volume24hr&ascending=false';
-    const res = await fetch('https://corsproxy.io/?' + encodeURIComponent(polyUrl));
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-
-    let allMarkets = Array.isArray(data) ? data : (data.markets || data.data || []);
-
-    // Filter only football league markets
-    const FOOTBALL_PATTERNS = [
-      /ligue.?(1|one|une)/i,
-      /premier.?league/i,
-      /la.?liga/i,
-      /serie.?a/i,
-      /bundesliga/i,
-      /champions.?league/i,
-      /ucl/i,
-      /ligue 1/i,
-      /win the.*ligue/i,
-      /win the.*premier/i,
-      /win the.*liga/i,
-      /win the.*bundesliga/i,
-      /win the.*serie/i,
-      /win the.*champions/i,
-      /will .* win on 20\d\d-\d\d-\d\d/i,
+    // Use events endpoint with football tag slugs for best coverage
+    // Fetch events from multiple football leagues in parallel
+    const LEAGUE_SLUGS = [
+      'ligue-1', 'premier-league', 'la-liga', 'serie-a', 'bundesliga', 'champions-league'
     ];
-    let markets = allMarkets.filter(m => {
-      const q = (m.question || m.title || '');
-      return FOOTBALL_PATTERNS.some(p => p.test(q));
+
+    const proxyBase = 'https://corsproxy.io/?';
+    const eventPromises = LEAGUE_SLUGS.map(async (league) => {
+      try {
+        const url = `https://gamma-api.polymarket.com/events?active=true&closed=false&tag_slug=${league}&limit=20&order=startDate&ascending=true`;
+        const r = await fetch(proxyBase + encodeURIComponent(url));
+        if (!r.ok) return [];
+        const d = await r.json();
+        return Array.isArray(d) ? d : [];
+      } catch { return []; }
     });
-    if (markets.length === 0) markets = allMarkets.slice(0, 20);
+
+    // Also fetch a general batch filtered by our known patterns
+    const generalUrl = `https://gamma-api.polymarket.com/events?active=true&closed=false&limit=100&order=startDate&ascending=true`;
+    const generalPromise = fetch(proxyBase + encodeURIComponent(generalUrl))
+      .then(r => r.ok ? r.json() : [])
+      .then(d => Array.isArray(d) ? d : [])
+      .catch(() => []);
+
+    const [generalData, ...leagueData] = await Promise.all([generalPromise, ...eventPromises]);
+
+    // Merge and deduplicate
+    const seen = new Set();
+    let allEvents = [...leagueData.flat(), ...generalData].filter(e => {
+      if (seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    });
+
+    // Filter football events
+    const FOOTBALL_PATTERNS = [
+      /ligue.?1/i, /premier.?league/i, /la.?liga/i, /serie.?a/i,
+      /bundesliga/i, /champions.?league/i, /ucl/i,
+      /will .+ win on \d{4}-\d{2}-\d{2}/i,
+      /fl1-/i, /epl-/i, /liga-/i, /sra-/i, /bun-/i, /ucl-/i,
+    ];
+
+    let allMarkets = [];
+    allEvents.forEach(event => {
+      const title = event.title || event.question || '';
+      const slug = event.slug || '';
+      const isFootball = FOOTBALL_PATTERNS.some(p => p.test(title) || p.test(slug));
+      if (!isFootball) return;
+
+      // An event contains multiple markets (outcomes)
+      const markets = event.markets || [];
+      if (markets.length > 0) {
+        // Represent the event as a single entry with all markets
+        allMarkets.push({ ...event, _isEvent: true, _markets: markets });
+      }
+    });
+
+    // Deduplicate by event id
+    const seenMarkets = new Set();
+    let markets = allMarkets.filter(m => {
+      const key = m.id || m.slug;
+      if (seenMarkets.has(key)) return false;
+      seenMarkets.add(key);
+      return true;
+    });
+
+    if (!markets.length) {
+      // Fallback: just show top events matching football patterns from general fetch
+      markets = generalData.filter(e => {
+        const q = (e.title || e.question || e.slug || '');
+        return FOOTBALL_PATTERNS.some(p => p.test(q));
+      }).slice(0, 20);
+    }
     if (!markets.length) throw new Error('Aucun marché trouvé');
 
     document.getElementById('polyCount').textContent = `${markets.length} marchés`;
 
-    grid.innerHTML = markets.map((m, idx) => {
-      let yesPrice = null, noPrice = null;
-      try {
-        let outcomes = m.outcomePrices || m.outcome_prices;
-        let names = m.outcomes;
-        if (typeof outcomes === 'string') outcomes = JSON.parse(outcomes);
-        if (typeof names === 'string') names = JSON.parse(names);
-        if (Array.isArray(names) && Array.isArray(outcomes)) {
-          names.forEach((name, i) => {
-            const price = parseFloat(outcomes[i]);
-            if (!isNaN(price)) {
-              const n = name.toLowerCase();
-              if (n === 'yes' || n === 'oui') yesPrice = price;
-              else if (n === 'no' || n === 'non') noPrice = price;
-            }
-          });
-        }
-        if (yesPrice === null && Array.isArray(outcomes) && outcomes.length >= 2) {
-          yesPrice = parseFloat(outcomes[0]);
-          noPrice = parseFloat(outcomes[1]);
-        }
-        if (yesPrice === null) {
+    const toOdd = p => p && p > 0 ? (1/p).toFixed(2) : '—';
+    const toProb = p => (p !== null && p !== undefined && !isNaN(p) && p > 0) ? `${(p*100).toFixed(0)}%` : '—';
+
+    const parsePrice = (m) => {
+      // Try outcomePrices on the market itself
+      let outcomes = m.outcomePrices || m.outcome_prices;
+      let names = m.outcomes;
+      try { if (typeof outcomes === 'string') outcomes = JSON.parse(outcomes); } catch(e) {}
+      try { if (typeof names === 'string') names = JSON.parse(names); } catch(e) {}
+
+      let prices = {};
+      if (Array.isArray(names) && Array.isArray(outcomes)) {
+        names.forEach((name, i) => {
+          const p = parseFloat(outcomes[i]);
+          if (!isNaN(p)) prices[name.toLowerCase()] = p;
+        });
+      }
+      // For match markets: outcomes are typically team names
+      // Return all prices keyed by name
+      return { prices, names: Array.isArray(names) ? names : [], outcomes: Array.isArray(outcomes) ? outcomes.map(Number) : [] };
+    };
+
+    grid.innerHTML = markets.map((event, idx) => {
+      const title = event.title || event.question || 'Marché';
+      const vol = parseFloat(event.volume || event.volume24hr || 0);
+      const volume = vol > 0 ? `Vol. $${Math.round(vol).toLocaleString('fr-FR')}` : '';
+      const startDate = event.startDate ? new Date(event.startDate).toLocaleDateString('fr-FR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
+      const polyLink = `https://polymarket.com/event/${event.slug || ''}`;
+
+      // Event has multiple markets (outcomes like home/draw/away or just yes/no)
+      const subMarkets = event._markets || event.markets || [event];
+
+      // Check if it's a match market with 3 outcomes (1X2) or binary
+      let cardContent = '';
+
+      if (subMarkets.length >= 3) {
+        // Match market: show each outcome
+        const outcomes = subMarkets.map(sm => {
+          const p = parseFloat(sm.lastTradePrice || sm.price || sm.outcomePrices?.[0] || 0);
+          return { name: sm.groupItemTitle || sm.question || sm.outcomes?.[0] || '?', price: p };
+        });
+        cardContent = outcomes.map(o => `
+          <div>
+            <div class="poly-odd yes" style="font-size:1.3rem">${toProb(o.price)}</div>
+            <div class="poly-odd-label">${o.name}<br>${toOdd(o.price)}x</div>
+          </div>`).join('');
+      } else if (subMarkets.length === 1 || subMarkets.length === 2) {
+        // Binary yes/no
+        const m = subMarkets[0];
+        const { prices, names, outcomes: outArr } = parsePrice(m);
+        let yesPrice = prices['yes'] || prices['oui'] || outArr[0] || null;
+        let noPrice = prices['no'] || prices['non'] || outArr[1] || null;
+        if (!yesPrice) {
           yesPrice = parseFloat(m.lastTradePrice || m.price || 0) || null;
           if (yesPrice) noPrice = 1 - yesPrice;
         }
-      } catch(e) {}
-
-      const toOdd = p => p && p > 0 ? (1/p).toFixed(2) : '—';
-      const toProb = p => (p !== null && p !== undefined && !isNaN(p) && p > 0) ? `${(p*100).toFixed(0)}%` : '—';
-      const vol = parseFloat(m.volume || m.volume24hr || 0);
-      const volume = vol > 0 ? `Vol. $${Math.round(vol).toLocaleString('fr-FR')}` : '';
+        cardContent = `
+          <div>
+            <div class="poly-odd yes">${toProb(yesPrice)}</div>
+            <div class="poly-odd-label">Oui · ${toOdd(yesPrice)}x</div>
+          </div>
+          <div>
+            <div class="poly-odd no">${toProb(noPrice)}</div>
+            <div class="poly-odd-label">Non · ${toOdd(noPrice)}x</div>
+          </div>`;
+      }
 
       return `
-      <div class="poly-card" style="animation-delay:${idx * 0.04}s">
+      <div class="poly-card" style="animation-delay:${idx * 0.04}s; cursor:pointer" onclick="window.open('${polyLink}','_blank')">
         <div>
-          <div class="poly-title">${m.question || m.title || 'Marché'}</div>
-          <div class="poly-subtitle">${volume}</div>
+          <div class="poly-title">${title}</div>
+          <div class="poly-subtitle">${[volume, startDate].filter(Boolean).join(' · ')}</div>
         </div>
-        <div>
-          <div class="poly-odd yes">${toProb(yesPrice)}</div>
-          <div class="poly-odd-label">Oui · ${toOdd(yesPrice)}x</div>
-        </div>
-        <div>
-          <div class="poly-odd no">${toProb(noPrice)}</div>
-          <div class="poly-odd-label">Non · ${toOdd(noPrice)}x</div>
-        </div>
+        ${cardContent}
       </div>`;
     }).join('');
 
