@@ -563,21 +563,6 @@
       Clique sur Rafraîchir pour charger les cotes
     </div>
   </div>
-
-  <!-- Polymarket section -->
-  <div class="poly-section">
-    <div class="section-header">
-      <div class="section-title">Polymarket</div>
-      <div class="poly-badge">Marchés prédictifs</div>
-      <div class="count-badge" id="polyCount">0 marchés</div>
-    </div>
-    <div class="matches-grid" id="polyGrid">
-      <div class="state-empty">
-        <span class="big">POLY</span>
-        Chargement des marchés Polymarket...
-      </div>
-    </div>
-  </div>
 </main>
 
 <script>
@@ -586,25 +571,23 @@ const BASE_URL = 'https://api.the-odds-api.com/v4';
 
 // Bookmaker name mapping (key → display name)
 const BOOK_NAMES = {
-  winamax: 'Winamax',
-  betclic: 'Betclic',
-  parionssport: 'ParionsSport',
-  betclic: 'Betclic',
-  winamax: 'Winamax',
-  unibet: 'Unibet',
+  betclic_fr: 'Betclic',
+  winamax_fr: 'Winamax',
+  parionssport_fr: 'Parions Sport',
+  pmu_fr: 'PMU',
   unibet_fr: 'Unibet FR',
+  betsson: 'Betsson',
   betway: 'Betway',
   bwin: 'Bwin',
-  pmu: 'PMU',
-  parionssport: 'ParionsSport',
   zebet: 'ZEbet',
-  betfair: 'Betfair',
   bet365: 'Bet365',
   williamhill: 'William Hill',
   pinnacle: 'Pinnacle',
-  draftkings: 'DraftKings',
-  fanduel: 'FanDuel',
-  bovada: 'Bovada',
+  winamax: 'Winamax',
+  betclic: 'Betclic',
+  parionssport: 'Parions Sport',
+  pmu: 'PMU',
+  unibet: 'Unibet',
 };
 
 function bookName(key) {
@@ -617,48 +600,107 @@ let currentSport = 'soccer_france_ligue_one';
 let polymarketData = {}; // { 'team1_team2': { home, draw, away, slug } }
 
 // Normalize team name for matching
+const TEAM_ALIASES = {
+  // Ligue 1
+  'stade brestois': 'brest', 'stade brestois 29': 'brest',
+  'olympique de marseille': 'marseille', 'om': 'marseille',
+  'paris saint-germain': 'psg', 'paris saint germain': 'psg', 'paris sg': 'psg', 'paris': 'psg',
+  'olympique lyonnais': 'lyon', 'ol': 'lyon',
+  'as monaco': 'monaco',
+  'ogc nice': 'nice',
+  'rc lens': 'lens',
+  'losc lille': 'lille', 'losc': 'lille',
+  'stade rennais': 'rennes', 'rennes fc': 'rennes', 'stade rennais fc': 'rennes',
+  'rc strasbourg': 'strasbourg', 'strasbourg alsace': 'strasbourg',
+  'fc nantes': 'nantes',
+  'toulouse fc': 'toulouse',
+  'montpellier hsc': 'montpellier', 'montpellier herault': 'montpellier',
+  'le havre ac': 'le havre', 'le havre': 'le havre',
+  'stade de reims': 'reims',
+  'fc lorient': 'lorient',
+  'angers sco': 'angers',
+  'aj auxerre': 'auxerre',
+  'as saint-etienne': 'saint-etienne', 'saint etienne': 'saint-etienne',
+  'metz fc': 'metz', 'fc metz': 'metz',
+  'havre': 'le havre',
+  // Premier League
+  'manchester city': 'man city', 'man. city': 'man city',
+  'manchester united': 'man united', 'man. united': 'man united',
+  'tottenham hotspur': 'tottenham', 'spurs': 'tottenham',
+  'newcastle united': 'newcastle',
+  'west ham united': 'west ham',
+  'aston villa': 'aston villa',
+  'brighton & hove albion': 'brighton', 'brighton and hove albion': 'brighton',
+  'wolverhampton wanderers': 'wolves', 'wolverhampton': 'wolves',
+  'nottingham forest': 'nottm forest', 'nott\'m forest': 'nottm forest',
+  'brentford': 'brentford',
+  'fulham': 'fulham',
+  'crystal palace': 'crystal palace',
+  'everton': 'everton',
+  'luton town': 'luton',
+  'sheffield united': 'sheffield utd',
+  'burnley': 'burnley',
+  // La Liga
+  'real madrid cf': 'real madrid',
+  'fc barcelona': 'barcelona', 'barça': 'barcelona',
+  'atletico madrid': 'atletico', 'atlético de madrid': 'atletico',
+  'sevilla fc': 'sevilla',
+  'real sociedad': 'real sociedad',
+  'villarreal cf': 'villarreal',
+  'athletic bilbao': 'athletic',  'athletic club': 'athletic',
+  'real betis': 'betis',
+  // Serie A
+  'inter milan': 'inter', 'fc internazionale': 'inter', 'internazionale': 'inter',
+  'ac milan': 'milan',
+  'juventus fc': 'juventus',
+  'ssc napoli': 'napoli',
+  'as roma': 'roma',
+  'ss lazio': 'lazio',
+  'atalanta bc': 'atalanta',
+  'acf fiorentina': 'fiorentina',
+  // Bundesliga
+  'fc bayern münchen': 'bayern', 'fc bayern munich': 'bayern', 'bayern munich': 'bayern',
+  'borussia dortmund': 'dortmund', 'bvb': 'dortmund',
+  'bayer leverkusen': 'leverkusen', 'bayer 04 leverkusen': 'leverkusen',
+  'rb leipzig': 'leipzig',
+  'borussia mönchengladbach': 'gladbach', 'borussia monchengladbach': 'gladbach',
+  'eintracht frankfurt': 'frankfurt',
+  'vfb stuttgart': 'stuttgart',
+  'sc freiburg': 'freiburg',
+  'union berlin': '1. fc union berlin',
+};
+
 function normTeam(name) {
-  return (name || '').toLowerCase()
-    .replace(/stade brestois 29/i, 'brest')
-    .replace(/olympique de marseille/i, 'marseille')
-    .replace(/paris saint.germain/i, 'psg')
-    .replace(/olympique lyonnais/i, 'lyon')
-    .replace(/as monaco/i, 'monaco')
-    .replace(/ogc nice/i, 'nice')
-    .replace(/rc lens/i, 'lens')
-    .replace(/losc lille/i, 'lille')
-    .replace(/stade rennais/i, 'rennes')
-    .replace(/rc strasbourg/i, 'strasbourg')
-    .replace(/fc nantes/i, 'nantes')
-    .replace(/toulouse fc/i, 'toulouse')
-    .replace(/montpellier/i, 'montpellier')
-    .replace(/le havre/i, 'le havre')
-    .replace(/stade de reims/i, 'reims')
-    .replace(/fc lorient/i, 'lorient')
-    .replace(/angers sco/i, 'angers')
-    .replace(/mans fc/i, 'le mans')
-    .replace(/aj auxerre/i, 'auxerre')
-    .replace(/saint.etienne/i, 'saint-etienne')
-    .replace(/inter milan/i, 'inter')
-    .replace(/ac milan/i, 'milan')
-    .replace(/juventus/i, 'juventus')
-    .replace(/manchester city/i, 'man city')
-    .replace(/manchester united/i, 'man united')
-    .replace(/arsenal/i, 'arsenal')
-    .replace(/chelsea/i, 'chelsea')
-    .replace(/liverpool/i, 'liverpool')
-    .replace(/real madrid/i, 'real madrid')
-    .replace(/atletico/i, 'atletico')
-    .replace(/barcelona/i, 'barcelona')
-    .replace(/fc /g, '')
-    .replace(/\bsc\b/g, '')
-    .replace(/\bfc\b/g, '')
-    .trim();
+  if (!name) return '';
+  const lower = name.toLowerCase()
+    .replace(/[àâä]/g, 'a').replace(/[éèêë]/g, 'e')
+    .replace(/[îï]/g, 'i').replace(/[ôö]/g, 'o')
+    .replace(/[ùûü]/g, 'u').replace(/[ç]/g, 'c')
+    .replace(/\s+/g, ' ').trim();
+
+  // Check full alias match first
+  if (TEAM_ALIASES[lower]) return TEAM_ALIASES[lower];
+
+  // Check partial alias match
+  for (const [alias, canonical] of Object.entries(TEAM_ALIASES)) {
+    if (lower.includes(alias) || alias.includes(lower)) return canonical;
+  }
+
+  // Generic cleanup
+  return lower
+    .replace(/\b(fc|af|ac|as|sc|rc|og|aj|sco|cf|bv|vfb|rb|ss|ssc|acf|fk|sk|sv)\b/g, '')
+    .replace(/\s+/g, ' ').trim();
 }
 
 function teamsMatch(a, b) {
   const na = normTeam(a), nb = normTeam(b);
-  return na === nb || na.includes(nb) || nb.includes(na);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.includes(nb) || nb.includes(na)) return true;
+  // Word-level matching: check if any significant word matches
+  const wordsA = na.split(' ').filter(w => w.length > 3);
+  const wordsB = nb.split(' ').filter(w => w.length > 3);
+  return wordsA.some(w => wordsB.includes(w));
 }
 
 // Tab switching
@@ -681,31 +723,25 @@ async function loadAll() {
   btn.classList.remove('loading');
 }
 
-// Local backend odds (Betclic, Winamax, ParionsSport)
-let localBackendData = {}; // { normKey: {winamax, betclic, parionssport} }
+// Local backend odds via coteur.com
+let localBackendData = {};
 
 async function fetchLocalBackend() {
   try {
-    const res = await fetch(`http://localhost:5000/odds/${currentSport}`, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(`http://localhost:5000/odds/${currentSport}`, { signal: AbortSignal.timeout(15000) });
     if (!res.ok) return;
     const data = await res.json();
 
     localBackendData = {};
-    const bookies = ['winamax', 'betclic', 'parionssport'];
-    bookies.forEach(bk => {
-      (data[bk] || []).forEach(m => {
-        const key = normTeam(m.home) + '|' + normTeam(m.away);
-        if (!localBackendData[key]) localBackendData[key] = {};
-        localBackendData[key][bk] = { home: m.home_odd, draw: m.draw_odd, away: m.away_odd };
-      });
+    (data || []).forEach(match => {
+      const key = normTeam(match.home) + '|' + normTeam(match.away);
+      localBackendData[key] = match.odds || {};
     });
 
-    // Show backend status badge
     const total = Object.keys(localBackendData).length;
     document.getElementById('backendBadge').style.display = total > 0 ? 'flex' : 'none';
-    document.getElementById('backendBadge').textContent = `🟢 Backend actif · ${total} matchs`;
+    document.getElementById('backendBadge').textContent = `🟢 Coteur actif · ${total} matchs`;
 
-    // Re-render with new data
     if (window._lastMatchData) renderMatches(window._lastMatchData);
   } catch(e) {
     document.getElementById('backendBadge').style.display = 'none';
@@ -714,7 +750,7 @@ async function fetchLocalBackend() {
 
 async function fetchBookmakers() {
   try {
-    const url = `${BASE_URL}/sports/${currentSport}/odds/?apiKey=${API_KEY}&regions=eu&markets=h2h&oddsFormat=decimal&bookmakers=betclic,winamax,unibet_fr,betway,bwin,zebet,parionssport,pmu,bet365,williamhill,pinnacle`;
+    const url = `${BASE_URL}/sports/${currentSport}/odds/?apiKey=${API_KEY}&regions=eu&markets=h2h&oddsFormat=decimal&bookmakers=betclic_fr,winamax_fr,parionssport_fr,pmu_fr,unibet_fr,bwin,zebet,bet365`;
     const res = await fetch(url);
     const quota = res.headers.get('x-requests-remaining');
     if (quota) document.getElementById('statQuota').textContent = quota;
@@ -891,7 +927,7 @@ function renderMatches(data) {
       bookOdds[bk.key] = outcomes;
     });
 
-    // Inject local backend odds (Betclic, Winamax, ParionsSport)
+    // Inject local backend odds from Coteur (Betclic, Winamax, ParionsSport...)
     const normHome = normTeam(match.home_team);
     const normAway = normTeam(match.away_team);
     for (const [key, bkData] of Object.entries(localBackendData)) {
@@ -899,7 +935,7 @@ function renderMatches(data) {
       if ((teamsMatch(normHome, kHome) && teamsMatch(normAway, kAway)) ||
           (teamsMatch(normHome, kAway) && teamsMatch(normAway, kHome))) {
         Object.entries(bkData).forEach(([bkName, odds]) => {
-          if (odds.home || odds.away) bookOdds[bkName] = odds;
+          if (odds && (odds.home || odds.away)) bookOdds[bkName] = odds;
         });
         break;
       }
@@ -916,7 +952,14 @@ function renderMatches(data) {
       }
     }
     if (polyEntry) {
-      bookOdds['polymarket'] = { home: polyEntry.home, draw: polyEntry.draw, away: polyEntry.away };
+      // Check if the match was found in reverse order (away team matched polymarket's home)
+      const [kHome] = Object.entries(polymarketData).find(([k,v]) => v === polyEntry)[0].split('|');
+      const isReversed = !teamsMatch(normHome, kHome);
+      bookOdds['polymarket'] = {
+        home: isReversed ? polyEntry.away : polyEntry.home,
+        draw: polyEntry.draw,
+        away: isReversed ? polyEntry.home : polyEntry.away
+      };
     }
 
     // Best odds
